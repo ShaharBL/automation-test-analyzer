@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automation Test Analyzer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  html, body { background: #0b1120; }
+  body { color: #e2e8f0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
+  .surface { background: #111a2e; border: 1px solid #1e293b; }
+  .surface-2 { background: #0d1424; border: 1px solid #1e293b; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 9999px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 9999px; background: currentColor; }
+  .pill-Passed { color: #34d399; background: rgba(16,185,129,0.13); }
+  .pill-Failed { color: #f87171; background: rgba(239,68,68,0.18); box-shadow: 0 0 0 1px rgba(239,68,68,0.25) inset; }
+  .pill-NotExecuted { color: #94a3b8; background: rgba(148,163,184,0.13); }
+  .pill-Aborted, .pill-Error, .pill-Unknown { color: #fbbf24; background: rgba(245,158,11,0.13); }
+  .scrollbar-thin::-webkit-scrollbar { width: 9px; height: 9px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 9999px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #334155; }
+  .test-row { cursor: default; transition: background-color 0.12s ease; }
+  .test-row.expandable { cursor: pointer; }
+  .test-row.expandable:hover { background: #14203a; }
+  .chevron { transition: transform 0.18s ease; }
+  .test-row.expanded .chevron { transform: rotate(90deg); }
+  .test-row.expanded { background: #0f1a32; }
+  .stack-trace { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+  .filter-btn { transition: all 0.15s ease; }
+  .filter-btn.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .filter-btn.active span { color: rgba(255,255,255,0.85) !important; }
+  .timeline-tooltip { position: absolute; pointer-events: none; background: #0b1120; border: 1px solid #334155; color: #e2e8f0; padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.45; box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 30; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 0.1s; }
+  .timeline-tooltip.visible { opacity: 1; }
+  .timeline-tooltip .t-name { font-weight: 600; margin-bottom: 4px; white-space: normal; }
+  .timeline-tooltip .t-row { display: flex; gap: 8px; color: #94a3b8; font-size: 11px; }
+  .timeline-tooltip .t-row span:last-child { color: #e2e8f0; font-variant-numeric: tabular-nums; }
+  .glow-fail { box-shadow: 0 0 0 1px rgba(239,68,68,0.4), 0 0 12px rgba(239,68,68,0.35); }
+  .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 9999px; margin-right: 6px; vertical-align: middle; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<header class="border-b border-slate-800 bg-slate-900/70 backdrop-blur sticky top-0 z-20">
+  <div class="px-6 py-3.5 flex items-center gap-4">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-sm">A</div>
+      <div>
+        <div class="text-base font-semibold text-white leading-tight">Automation Test Analyzer</div>
+        <div class="text-xs text-slate-400">{{ runs|length }} run{{ '' if runs|length == 1 else 's' }} loaded</div>
+      </div>
+    </div>
+  </div>
+  {% if runs|length > 1 %}
+  <nav id="run-tabs" class="px-6 flex gap-1 overflow-x-auto scrollbar-thin">
+    {% for run in runs %}
+      <button class="run-tab whitespace-nowrap px-4 py-2 text-sm border-b-2 {% if loop.first %}border-blue-500 text-white{% else %}border-transparent text-slate-400 hover:text-slate-200{% endif %}" data-tab="{{ run.index }}">{{ run.source_file }}</button>
+    {% endfor %}
+  </nav>
+  {% endif %}
+</header>
+
+<main class="p-4 md:p-6 max-w-[1600px] mx-auto">
+  {% for run in runs %}
+  <section class="run-pane {% if not loop.first %}hidden{% endif %}" data-pane="{{ run.index }}">
+
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      <div class="surface rounded-xl p-4">
+        <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Total Tests</div>
+        <div class="text-2xl md:text-3xl font-bold mt-1 text-white tabular-nums">{{ run.counts.total }}</div>
+      </div>
+      <div class="surface rounded-xl p-4">
+        <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Passed</div>
+        <div class="text-2xl md:text-3xl font-bold mt-1 text-emerald-400 tabular-nums">{{ run.counts.passed }}</div>
+      </div>
+      <div class="surface rounded-xl p-4">
+        <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Failed</div>
+        <div class="text-2xl md:text-3xl font-bold mt-1 text-red-400 tabular-nums">{{ run.counts.failed }}</div>
+      </div>
+      <div class="surface rounded-xl p-4">
+        <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Skipped / Other</div>
+        <div class="text-2xl md:text-3xl font-bold mt-1 text-slate-300 tabular-nums">{{ run.counts.skipped + run.counts.other }}</div>
+      </div>
+      <div class="surface rounded-xl p-4">
+        <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Pass Rate</div>
+        <div class="text-2xl md:text-3xl font-bold mt-1 text-blue-400 tabular-nums">{{ run.pass_rate }}%</div>
+      </div>
+      <div class="surface rounded-xl p-4">
+        <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Duration</div>
+        <div class="text-2xl md:text-3xl font-bold mt-1 text-white tabular-nums" data-duration-card="{{ run.index }}">{{ run.total_duration_s }}s</div>
+      </div>
+    </div>
+
+    <!-- Charts row -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+      <div class="surface rounded-xl p-4 lg:col-span-1">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-slate-200">Outcome Distribution</h3>
+          <span class="text-[11px] text-slate-500 uppercase tracking-wider">Donut</span>
+        </div>
+        <div class="relative" style="height: 280px;">
+          <canvas id="donut-{{ run.index }}"></canvas>
+        </div>
+      </div>
+      <div class="surface rounded-xl p-4 lg:col-span-2">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-slate-200">Chronological Timeline</h3>
+          <div class="flex items-center gap-3 text-xs text-slate-400">
+            <span><span class="legend-dot" style="background:#10b981"></span>Passed</span>
+            <span><span class="legend-dot" style="background:#ef4444"></span>Failed</span>
+            <span><span class="legend-dot" style="background:#64748b"></span>NotExecuted</span>
+          </div>
+        </div>
+        <div class="relative">
+          <div class="overflow-auto scrollbar-thin rounded-lg surface-2" style="max-height: 360px;">
+            <canvas id="timeline-{{ run.index }}" class="block"></canvas>
+          </div>
+          <div class="timeline-tooltip" id="timeline-tip-{{ run.index }}"></div>
+        </div>
+        <div class="text-[11px] text-slate-500 mt-2">Hover a bar for details. Click a failed bar to jump to it in the list below.</div>
+      </div>
+    </div>
+
+    <!-- Test Explorer -->
+    <div class="surface rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-slate-800 flex flex-wrap items-center gap-3">
+        <div class="relative flex-1 min-w-[260px]">
+          <input type="text" data-search="{{ run.index }}"
+                 placeholder="Search by test name or error message..."
+                 class="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40">
+          <svg class="absolute left-3 top-2.5 w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.2-5.2m2.2-5.3a7.5 7.5 0 11-15 0 7.5 7.5 0 0115 0z"/>
+          </svg>
+        </div>
+        <div class="flex flex-wrap gap-1.5" data-filters="{{ run.index }}">
+          <button class="filter-btn active px-3 py-1.5 text-xs rounded-lg border border-slate-700 text-slate-300 font-medium" data-filter="all">
+            All <span class="ml-1 text-slate-500 font-normal">{{ run.counts.total }}</span>
+          </button>
+          <button class="filter-btn px-3 py-1.5 text-xs rounded-lg border border-slate-700 text-slate-300 font-medium" data-filter="Passed">
+            Passed <span class="ml-1 text-emerald-400 font-normal">{{ run.counts.passed }}</span>
+          </button>
+          <button class="filter-btn px-3 py-1.5 text-xs rounded-lg border border-slate-700 text-slate-300 font-medium" data-filter="Failed">
+            Failed <span class="ml-1 text-red-400 font-normal">{{ run.counts.failed }}</span>
+          </button>
+          <button class="filter-btn px-3 py-1.5 text-xs rounded-lg border border-slate-700 text-slate-300 font-medium" data-filter="NotExecuted">
+            NotExecuted <span class="ml-1 text-slate-400 font-normal">{{ run.counts.skipped }}</span>
+          </button>
+        </div>
+      </div>
+      <div data-list="{{ run.index }}" class="divide-y divide-slate-800/70 max-h-[800px] overflow-auto scrollbar-thin"></div>
+      <div data-empty="{{ run.index }}" class="hidden p-10 text-center text-slate-500 text-sm">No tests match the current filters.</div>
+      <div data-count="{{ run.index }}" class="px-4 py-2 border-t border-slate-800 text-[11px] text-slate-500 bg-slate-900/40"></div>
+    </div>
+  </section>
+  {% endfor %}
+</main>
+
+<script id="runs-data" type="application/json">{{ runs_json | safe }}</script>
+<script>
+(() => {
+  const RUNS = JSON.parse(document.getElementById('runs-data').textContent);
+
+  const OUTCOME_COLORS = {
+    Passed: '#10b981',
+    Failed: '#ef4444',
+    NotExecuted: '#64748b',
+    Aborted: '#f59e0b',
+    Error: '#ef4444',
+    Unknown: '#94a3b8',
+  };
+
+  const escapeHtml = s => (s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  const formatTime = iso => {
+    try {
+      const d = new Date(iso);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      const ss = String(d.getSeconds()).padStart(2, '0');
+      const ms = String(d.getMilliseconds()).padStart(3, '0');
+      return `${hh}:${mm}:${ss}.${ms}`;
+    } catch (e) { return iso; }
+  };
+
+  const formatDuration = ms => {
+    if (ms < 1000) return ms.toFixed(0) + ' ms';
+    if (ms < 60000) return (ms / 1000).toFixed(2) + ' s';
+    const m = Math.floor(ms / 60000);
+    const s = ((ms % 60000) / 1000).toFixed(1);
+    return `${m}m ${s}s`;
+  };
+
+  const formatRel = ms => {
+    if (ms < 1000) return ms + ' ms';
+    if (ms < 60000) return (ms / 1000).toFixed(1) + ' s';
+    return (ms / 60000).toFixed(1) + ' m';
+  };
+
+  // ---- Tabs ----
+  document.querySelectorAll('.run-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.tab;
+      document.querySelectorAll('.run-tab').forEach(b => {
+        const active = b.dataset.tab === id;
+        b.classList.toggle('border-blue-500', active);
+        b.classList.toggle('text-white', active);
+        b.classList.toggle('border-transparent', !active);
+        b.classList.toggle('text-slate-400', !active);
+      });
+      document.querySelectorAll('.run-pane').forEach(p => {
+        p.classList.toggle('hidden', p.dataset.pane !== id);
+      });
+    });
+  });
+
+  RUNS.forEach(run => {
+    buildDonut(run);
+    const tlApi = buildTimeline(run);
+    setupExplorer(run, tlApi);
+  });
+
+  // ---- Donut ----
+  function buildDonut(run) {
+    const canvas = document.getElementById('donut-' + run.index);
+    if (!canvas) return;
+    const dist = run.outcome_dist;
+    const labels = Object.keys(dist);
+    if (!labels.length) {
+      canvas.parentElement.innerHTML = '<div class="text-slate-500 text-sm text-center pt-20">No tests in this run.</div>';
+      return;
+    }
+    const data = labels.map(l => dist[l]);
+    const colors = labels.map(l => OUTCOME_COLORS[l] || '#f59e0b');
+    new Chart(canvas, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: '#0b1120', borderWidth: 3, hoverOffset: 6 }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '62%',
+        animation: { duration: 600 },
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#cbd5e1', boxWidth: 12, padding: 14, font: { size: 12 } } },
+          tooltip: {
+            backgroundColor: '#0b1120',
+            borderColor: '#334155',
+            borderWidth: 1,
+            titleColor: '#e2e8f0',
+            bodyColor: '#cbd5e1',
+            callbacks: {
+              label: ctx => {
+                const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                const pct = total ? ((ctx.raw / total) * 100).toFixed(1) : 0;
+                return ` ${ctx.label}: ${ctx.raw} (${pct}%)`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // ---- Timeline (custom canvas — fast even with thousands of tests) ----
+  function buildTimeline(run) {
+    const canvas = document.getElementById('timeline-' + run.index);
+    const tooltip = document.getElementById('timeline-tip-' + run.index);
+    if (!canvas) return { jumpTo: () => {} };
+
+    const tests = run.tests;
+    if (!tests.length) {
+      canvas.parentElement.innerHTML = '<div class="text-slate-500 text-sm text-center py-10">No tests in this run.</div>';
+      return { jumpTo: () => {} };
+    }
+
+    const rowH = 6;
+    const padding = { top: 28, right: 12, bottom: 12, left: 12 };
+    const minRows = 30;
+    const innerHeight = Math.max(minRows, tests.length) * rowH;
+
+    let layout = null;
+
+    const totalMs = Math.max(1, ...tests.map(t => t.rel_end_ms));
+
+    function draw() {
+      const dpr = window.devicePixelRatio || 1;
+      const wrap = canvas.parentElement;
+      const cssWidth = Math.max(600, wrap.clientWidth - 2);
+      const cssHeight = padding.top + padding.bottom + innerHeight;
+
+      canvas.style.width = cssWidth + 'px';
+      canvas.style.height = cssHeight + 'px';
+      canvas.width = Math.floor(cssWidth * dpr);
+      canvas.height = Math.floor(cssHeight * dpr);
+
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+      const plotLeft = padding.left;
+      const plotRight = cssWidth - padding.right;
+      const plotWidth = Math.max(10, plotRight - plotLeft);
+      const xScale = ms => plotLeft + (ms / totalMs) * plotWidth;
+
+      // X-axis ticks
+      ctx.fillStyle = '#0d1424';
+      ctx.fillRect(0, 0, cssWidth, padding.top);
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, padding.top); ctx.lineTo(cssWidth, padding.top); ctx.stroke();
+
+      const targetTicks = Math.max(4, Math.min(10, Math.floor(plotWidth / 110)));
+      const tickStep = niceStep(totalMs / targetTicks);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      for (let t = 0; t <= totalMs; t += tickStep) {
+        const x = xScale(t);
+        ctx.strokeStyle = 'rgba(148,163,184,0.08)';
+        ctx.beginPath(); ctx.moveTo(x, padding.top); ctx.lineTo(x, cssHeight - padding.bottom); ctx.stroke();
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText(formatRel(t), x, padding.top / 2);
+      }
+
+      // Bars
+      const failedRects = [];
+      const otherRects = [];
+      for (const t of tests) {
+        const y = padding.top + t.i * rowH;
+        const x0 = xScale(t.rel_start_ms);
+        const x1 = Math.max(x0 + 1, xScale(t.rel_end_ms));
+        const w = Math.max(1, x1 - x0);
+        const h = Math.max(2, rowH - 1);
+        const color = OUTCOME_COLORS[t.outcome] || '#94a3b8';
+        if (t.outcome === 'Failed') {
+          failedRects.push({ x: x0, y, w, h, color });
+        } else {
+          otherRects.push({ x: x0, y, w, h, color });
+        }
+      }
+      // Draw non-failed first so failed bars sit on top
+      for (const r of otherRects) {
+        ctx.fillStyle = r.color;
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+      }
+      // Failed bars with subtle glow
+      ctx.shadowColor = 'rgba(239,68,68,0.6)';
+      ctx.shadowBlur = 6;
+      for (const r of failedRects) {
+        ctx.fillStyle = r.color;
+        ctx.fillRect(r.x, r.y - 0.5, Math.max(3, r.w), r.h + 1);
+      }
+      ctx.shadowBlur = 0;
+
+      layout = { cssWidth, cssHeight, plotLeft, plotRight, xScale, rowH };
+    }
+
+    // Hit testing & tooltip
+    function findTestAt(px, py) {
+      if (!layout) return null;
+      if (py < padding.top || py > layout.cssHeight - padding.bottom) return null;
+      const row = Math.floor((py - padding.top) / rowH);
+      if (row < 0 || row >= tests.length) return null;
+      const t = tests[row];
+      const x0 = layout.xScale(t.rel_start_ms);
+      const x1 = Math.max(x0 + 3, layout.xScale(t.rel_end_ms));
+      // Give a small horizontal slack so tiny bars are still hittable
+      if (px >= x0 - 2 && px <= x1 + 2) return t;
+      // If not on bar, still return the nearest test on this row for context
+      return t;
+    }
+
+    function showTooltip(t, clientX, clientY) {
+      const wrap = canvas.parentElement.parentElement; // .relative parent
+      const rect = wrap.getBoundingClientRect();
+      tooltip.innerHTML = `
+        <div class="t-name" style="color:${OUTCOME_COLORS[t.outcome] || '#e2e8f0'};">${escapeHtml(t.name)}</div>
+        <div class="t-row"><span>Outcome</span><span>${t.outcome}</span></div>
+        <div class="t-row"><span>Duration</span><span>${formatDuration(t.duration_ms)}</span></div>
+        <div class="t-row"><span>Start</span><span>${formatTime(t.start_iso)}</span></div>
+        <div class="t-row"><span>#</span><span>${t.i + 1} of ${tests.length}</span></div>
+      `;
+      tooltip.style.left = Math.min(Math.max(8, clientX - rect.left + 14), rect.width - 360) + 'px';
+      tooltip.style.top = Math.max(8, clientY - rect.top - 10) + 'px';
+      tooltip.classList.add('visible');
+    }
+    function hideTooltip() { tooltip.classList.remove('visible'); }
+
+    canvas.addEventListener('mousemove', e => {
+      const rect = canvas.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const t = findTestAt(px, py);
+      if (t) showTooltip(t, e.clientX, e.clientY); else hideTooltip();
+    });
+    canvas.addEventListener('mouseleave', hideTooltip);
+
+    let onClick = null;
+    canvas.addEventListener('click', e => {
+      const rect = canvas.getBoundingClientRect();
+      const t = findTestAt(e.clientX - rect.left, e.clientY - rect.top);
+      if (t && onClick) onClick(t);
+    });
+
+    draw();
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(draw, 80);
+    });
+
+    return {
+      onClick: cb => { onClick = cb; },
+      jumpTo: testIndex => {
+        // Scroll the timeline so the row is visible
+        const wrap = canvas.parentElement;
+        const y = padding.top + testIndex * rowH;
+        wrap.scrollTo({ top: Math.max(0, y - wrap.clientHeight / 2), behavior: 'smooth' });
+      },
+    };
+  }
+
+  function niceStep(rough) {
+    const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+    const norm = rough / pow;
+    let nice;
+    if (norm < 1.5) nice = 1;
+    else if (norm < 3) nice = 2;
+    else if (norm < 7) nice = 5;
+    else nice = 10;
+    return Math.max(1, nice * pow);
+  }
+
+  // ---- Test list / explorer ----
+  function setupExplorer(run, timeline) {
+    const listEl = document.querySelector(`[data-list="${run.index}"]`);
+    const emptyEl = document.querySelector(`[data-empty="${run.index}"]`);
+    const searchEl = document.querySelector(`[data-search="${run.index}"]`);
+    const filtersEl = document.querySelector(`[data-filters="${run.index}"]`);
+    const countEl = document.querySelector(`[data-count="${run.index}"]`);
+
+    let activeFilter = 'all';
+    let query = '';
+    let rendered = [];
+
+    const CAP = 600; // Limit DOM nodes for responsiveness on huge runs
+
+    function render() {
+      const q = query.trim().toLowerCase();
+      const filtered = run.tests.filter(t => {
+        if (activeFilter !== 'all' && t.outcome !== activeFilter) return false;
+        if (q) {
+          const hay = (t.name + ' ' + t.error_message).toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
+      rendered = filtered.slice(0, CAP);
+
+      if (!filtered.length) {
+        listEl.innerHTML = '';
+        emptyEl.classList.remove('hidden');
+        countEl.textContent = '0 tests';
+        return;
+      }
+      emptyEl.classList.add('hidden');
+
+      listEl.innerHTML = rendered.map(t => rowHtml(t)).join('');
+      countEl.textContent = filtered.length > CAP
+        ? `Showing first ${CAP} of ${filtered.length} matching tests — refine the search or filters to narrow further.`
+        : `Showing ${filtered.length} of ${run.tests.length} tests`;
+
+      // Bind expand/collapse on expandable rows
+      listEl.querySelectorAll('.test-row.expandable').forEach(row => {
+        row.addEventListener('click', () => {
+          const detail = row.querySelector('.test-detail');
+          if (!detail) return;
+          const open = !detail.classList.contains('hidden');
+          detail.classList.toggle('hidden', open);
+          row.classList.toggle('expanded', !open);
+        });
+      });
+    }
+
+    function rowHtml(t) {
+      const expandable = (t.outcome === 'Failed' || t.outcome === 'Error') && (t.error_message || t.stack_trace);
+      return `
+        <div class="test-row ${expandable ? 'expandable' : ''}" data-test-id="${t.i}">
+          <div class="px-4 py-2.5 flex items-center gap-3 text-sm">
+            <svg class="chevron w-3 h-3 text-slate-500 shrink-0 ${expandable ? '' : 'invisible'}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
+            <span class="pill pill-${t.outcome} shrink-0">${t.outcome}</span>
+            <span class="flex-1 min-w-0 truncate text-slate-100 font-mono text-[12px]" title="${escapeHtml(t.name)}">${escapeHtml(t.name)}</span>
+            <span class="text-slate-400 text-xs tabular-nums w-20 text-right shrink-0">${formatDuration(t.duration_ms)}</span>
+            <span class="text-slate-500 text-xs tabular-nums w-28 text-right shrink-0 hidden md:inline">${formatTime(t.start_iso)}</span>
+          </div>
+          ${expandable ? `
+            <div class="test-detail hidden px-4 pb-4 pt-1" onclick="event.stopPropagation()">
+              <div class="surface-2 rounded-lg p-3 space-y-3">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                  <div><div class="text-slate-500 uppercase tracking-wider text-[10px] font-semibold">Duration</div><div class="text-slate-200 mt-0.5 tabular-nums">${formatDuration(t.duration_ms)}</div></div>
+                  <div><div class="text-slate-500 uppercase tracking-wider text-[10px] font-semibold">Start</div><div class="text-slate-200 mt-0.5 font-mono">${formatTime(t.start_iso)}</div></div>
+                  <div><div class="text-slate-500 uppercase tracking-wider text-[10px] font-semibold">End</div><div class="text-slate-200 mt-0.5 font-mono">${formatTime(t.end_iso)}</div></div>
+                  <div><div class="text-slate-500 uppercase tracking-wider text-[10px] font-semibold">Outcome</div><div class="text-red-400 mt-0.5 font-semibold">${t.outcome}</div></div>
+                </div>
+                ${t.error_message ? `
+                  <div>
+                    <div class="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-1">Error Message</div>
+                    <div class="bg-red-950/40 border border-red-900/60 text-red-200 rounded px-3 py-2 stack-trace">${escapeHtml(t.error_message)}</div>
+                  </div>
+                ` : ''}
+                ${t.stack_trace ? `
+                  <div>
+                    <div class="text-[10px] text-slate-500 uppercase tracking-wider font-semibold mb-1">Stack Trace</div>
+                    <pre class="bg-slate-950 border border-slate-800 text-slate-300 rounded px-3 py-2 stack-trace max-h-96 overflow-auto scrollbar-thin">${escapeHtml(t.stack_trace)}</pre>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    function jumpToTest(t) {
+      // If the test isn't in the current filter, reset to "All" + clear search
+      const inView = rendered.some(r => r.i === t.i);
+      if (!inView) {
+        activeFilter = 'all';
+        query = '';
+        searchEl.value = '';
+        filtersEl.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+        render();
+      }
+      const row = listEl.querySelector(`.test-row[data-test-id="${t.i}"]`);
+      if (!row) return;
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Briefly highlight
+      row.classList.add('expanded');
+      setTimeout(() => {
+        const detail = row.querySelector('.test-detail');
+        if (detail && detail.classList.contains('hidden')) {
+          detail.classList.remove('hidden');
+        }
+      }, 300);
+    }
+
+    searchEl.addEventListener('input', e => { query = e.target.value; render(); });
+    filtersEl.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeFilter = btn.dataset.filter;
+        filtersEl.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+        render();
+      });
+    });
+
+    if (timeline && timeline.onClick) {
+      timeline.onClick(t => jumpToTest(t));
+    }
+
+    render();
+  }
+})();
+</script>
+</body>
+</html>
